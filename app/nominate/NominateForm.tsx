@@ -1,0 +1,59 @@
+"use client";
+
+import { useState } from "react";
+
+export default function NominateForm() {
+  const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
+  const [status, setStatus] = useState<string>("");
+
+  const submit = async () => {
+    setStatus("");
+
+    if (!title.trim()) {
+      setStatus("Please add a title.");
+      return;
+    }
+
+    // Temporary: just prove the form works.
+    // Next step: send this to Notion via an API route.
+    console.log("Nomination submitted:", { title, details });
+
+    setTitle("");
+    setDetails("");
+    setStatus("Submitted! (Next we’ll send this to moderation.)");
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <label>
+        <div style={{ fontWeight: 600 }}>Nomination title</div>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Example: Reply-All Guy"
+          style={{ width: "100%", padding: 8, marginTop: 6 }}
+          maxLength={80}
+        />
+      </label>
+
+      <label style={{ display: "block", marginTop: 12 }}>
+        <div style={{ fontWeight: 600 }}>Details (optional)</div>
+        <textarea
+          value={details}
+          onChange={(e) => setDetails(e.target.value)}
+          placeholder="Why are they the POS of the week?"
+          style={{ width: "100%", padding: 8, marginTop: 6 }}
+          rows={4}
+          maxLength={500}
+        />
+      </label>
+
+      <button onClick={submit} style={{ marginTop: 12 }}>
+        Submit nomination
+      </button>
+
+      {status ? <p style={{ marginTop: 10 }}>{status}</p> : null}
+    </div>
+  );
+}

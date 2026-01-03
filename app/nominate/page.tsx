@@ -1,8 +1,11 @@
+import NominateForm from "./NominateForm";
+
 export default function NominatePage() {
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Nominate</h1>
-      <p>Nomination form goes here (we’ll wire it next).</p>
+    <main style={{ padding: 24, maxWidth: 700 }}>
+      <h1>Nominate a POS</h1>
+      <p>Keep it about public situations/archetypes only. No private individuals.</p>
+      <NominateForm />
     </main>
   );
 }
