@@ -28,9 +28,10 @@ export default function NominateForm() {
   });
 
   if (!res.ok) {
-    setStatus("Submission failed. Please try again.");
-    return;
-  }
+  const txt = await res.text();
+  setStatus(txt || "Submission failed.");
+  return;
+}
 
   setTitle("");
   setDetails("");

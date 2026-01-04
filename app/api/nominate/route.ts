@@ -35,10 +35,10 @@ export async function POST(req: Request) {
   });
 
   if (!notionRes.ok) {
-    const err = await notionRes.text();
-    console.error("Notion API error:", err);
-    return NextResponse.json({ error: err }, { status: 500 });
-  }
+  const err = await notionRes.text();
+  return new NextResponse(err, { status: 500 });
+}
+
 
   return NextResponse.json({ success: true });
 }
