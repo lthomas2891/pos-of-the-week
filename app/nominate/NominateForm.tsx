@@ -8,21 +8,34 @@ export default function NominateForm() {
   const [status, setStatus] = useState<string>("");
 
   const submit = async () => {
-    setStatus("");
+  setStatus("");
 
-    if (!title.trim()) {
-      setStatus("Please add a title.");
-      return;
-    }
+  if (!title.trim()) {
+    setStatus("Please add a title.");
+    return;
+  }
 
-    // Temporary: just prove the form works.
-    // Next step: send this to Notion via an API route.
-    console.log("Nomination submitted:", { title, details });
+  const res = await fetch("/api/nominate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
 
-    setTitle("");
-    setDetails("");
-    setStatus("Submitted! (Next we’ll send this to moderation.)");
-  };
+    // 👇 THIS is where `body:` lives
+    body: JSON.stringify({
+      nominee: title,
+      reason: details,
+      link: "",
+    }),
+  });
+
+  if (!res.ok) {
+    setStatus("Submission failed. Please try again.");
+    return;
+  }
+
+  setTitle("");
+  setDetails("");
+  setStatus("Submitted for moderation!");
+};
 
   return (
     <div style={{ marginTop: 16 }}>
