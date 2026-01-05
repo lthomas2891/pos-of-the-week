@@ -4,6 +4,8 @@ export async function POST(req: Request) {
   const body = await req.json();
   const { nominee, reason, link } = body;
 
+  console.log("NOTION_TOKEN prefix:", process.env.NOTION_TOKEN?.slice(0, 4));
+
   if (!nominee) {
     return NextResponse.json({ error: "Missing nominee" }, { status: 400 });
   }
