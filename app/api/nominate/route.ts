@@ -34,6 +34,9 @@ export async function POST(req: Request) {
         "Date Submitted": {
           date: { start: today },
         },
+        Status: {
+  select: { name: "Needs AI Review" },
+},
       },
     }),
   });
