@@ -1,5 +1,20 @@
 export const runtime = "nodejs";
 
+export async function POST() {
+  const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
+  const notionToken = (process.env.NOTION_TOKEN || "").trim();
+  const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
+
+  if (!openaiKey) return new NextResponse("Missing OPENAI_API_KEY (Vercel env var)", { status: 500 });
+  if (!notionToken) return new NextResponse("Missing NOTION_TOKEN (Vercel env var)", { status: 500 });
+  if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID (Vercel env var)", { status: 500 });
+
+  try {
+      } catch (e: any) {
+    return new NextResponse(`AI Review crashed: ${e?.message || String(e)}`, { status: 500 });
+  }
+}
+
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
