@@ -15,12 +15,14 @@ export async function POST(req: Request) {
   const notionRes = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.NOTION_TOKEN}`,
+     Authorization: `Bearer ${(process.env.NOTION_TOKEN || "").trim()}`,
+
       "Content-Type": "application/json",
       "Notion-Version": "2022-06-28",
     },
     body: JSON.stringify({
-      parent: { database_id: process.env.NOTION_DATABASE_ID },
+      parent: { database_id: (process.env.NOTION_DATABASE_ID || "").trim() },
+
       properties: {
         Nominee: {
           title: [{ text: { content: nominee } }],
