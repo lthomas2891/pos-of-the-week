@@ -8,138 +8,131 @@ const notionHeaders = () => ({
   "Notion-Version": "2022-06-28",
 });
 
-// --- Simple SAFE/UNSAFE heuristics (demo-quality) ---
-function looksLikeEmail(s: string) {
+/* -------- Demo SAFE / UNSAFE rules (no OpenAI) -------- */
+
+function hasEmail(s: string) {
   return /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(s);
 }
-function looksLikePhone(s: string) {
+function hasPhone(s: string) {
   return /(\+?\d[\d\s().-]{7,}\d)/.test(s);
 }
-function looksLikeHandle(s: string) {
+function hasHandle(s: string) {
   return /@\w{2,}/.test(s);
 }
-function looksLikeAddress(s: string) {
-  // rough: number + street-ish word
+function hasAddress(s: string) {
   return /\b\d{1,5}\s+\w+(\s+\w+){0,3}\s+(st|street|ave|avenue|rd|road|blvd|lane|ln|dr|drive|ct|court)\b/i.test(s);
 }
-function looksLikeFullName(s: string) {
-  // two capitalized words (rough, but works for demo)
+function hasFullName(s: string) {
   return /\b[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}\b/.test(s);
 }
 function mentionsMinor(s: string) {
-  return /\b(minor|child|kid|toddler|teen|underage|my son|my daughter|high schooler|middle school)\b/i.test(s);
+  return /\b(minor|child|kid|toddler|teen|underage|my son|my daughter)\b/i.test(s);
 }
 
 function classify(nominee: string, reason: string) {
-  const text = `${nominee} ${reason}`.trim();
-
-  // UNSAFE signals: PII / private individual vibes
+  const t = `${nominee} ${reason}`;
   if (
-    looksLikeEmail(text) ||
-    looksLikePhone(text) ||
-    looksLikeHandle(text) ||
-    looksLikeAddress(text) ||
-    mentionsMinor(text)
+    hasEmail(t) ||
+    hasPhone(t) ||
+    hasHandle(t) ||
+    hasAddress(t) ||
+    hasFullName(t) ||
+    mentionsMinor(t)
   ) {
     return "UNSAFE" as const;
   }
-
-  // If it looks like a specific person's full name, treat as UNSAFE for your rules
-  if (looksLikeFullName(text)) return "UNSAFE" as const;
-
-  // Otherwise SAFE (archetype / behavior / situation)
   return "SAFE" as const;
 }
 
-function rewriteSafe(nominee: string) {
-  // Turn "Reply-All Guy" style into vote-ready if needed
-  const n = nominee.trim();
-  if (!n) return "";
-
-  // If it already ends with "guy" / "person" / "energy", keep it punchy
-  if (/\b(guy|person|energy|behavior)\b/i.test(n)) return n;
-
-  // Otherwise make it archetype-ish
-  return `${n} Guy`;
+function rewrite(nominee: string) {
+  if (/\b(guy|person|energy|behavior)\b/i.test(nominee)) return nominee;
+  return `${nominee} Guy`;
 }
 
-function summarizeSafe(nominee: string, reason: string) {
-  const n = nominee.trim();
-  const r = reason.trim();
-  if (!r) return `The weekly vote for: ${n}.`;
-  // 1–2 sentence clean summary
-  const short = r.length > 140 ? r.slice(0, 137) + "..." : r;
-  return `${short}`;
+function summarize(nominee: string, reason: string) {
+  if (!reason) return `Vote on the weekly ${nominee}.`;
+  return reason.length > 160 ? reason.slice(0, 157) + "..." : reason;
 }
+
+/* ------------------- API ------------------- */
 
 export async function POST() {
   try {
     const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
     const notionToken = (process.env.NOTION_TOKEN || "").trim();
-    if (!notionToken) return new NextResponse("Missing NOTION_TOKEN", { status: 500 });
-    if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID", { status: 500 });
 
-    // Find rows where AI Filter Result is empty
+    if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID", { status: 500 });
+    if (!notionToken) return new NextResponse("Missing NOTION_TOKEN", { status: 500 });
+
+    // Get rows needing AI review
     const q = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
       method: "POST",
       headers: notionHeaders(),
       body: JSON.stringify({
-        filter: { property: "AI Filter Result", rich_text: { is_empty: true } },
+        filter: {
+          property: "AI Filter Result",
+          rich_text: { is_empty: true },
+        },
         page_size: 10,
       }),
     });
 
     const qText = await q.text();
-    if (!q.ok) return new NextResponse(`Notion query failed: ${q.status}\n${qText}`, { status: 500 });
+    if (!q.ok) return new NextResponse(qText, { status: 500 });
 
-    const qjson: any = JSON.parse(qText);
-    const pages = qjson.results || [];
+    const pages = JSON.parse(qText).results || [];
 
     for (const p of pages) {
       const pageId = p.id;
 
       const nominee =
-        p.properties?.Nominee?.title?.map((t: any) => t.plain_text).join("")?.trim() || "";
+        p.properties?.Nominee?.title?.map((t: any) => t.plain_text).join("") || "";
       const reason =
-        p.properties?.Reason?.rich_text?.map((t: any) => t.plain_text).join("")?.trim() || "";
+        p.properties?.Reason?.rich_text?.map((t: any) => t.plain_text).join("") || "";
 
       if (!nominee) continue;
 
       const result = classify(nominee, reason);
+      const rewritten = result === "SAFE" ? rewrite(nominee) : "";
+      const summary =
+        result === "SAFE"
+          ? summarize(rewritten, reason)
+          : "Flagged for moderator review.";
 
-      let rewritten = "";
-      let summary = "";
-
-      if (result === "SAFE") {
-        rewritten = rewriteSafe(nominee);
-        summary = summarizeSafe(rewritten, reason);
-      } else {
-        // For UNSAFE, keep rewrite/summary minimal (or blank) for moderation
-        rewritten = "";
-        summary = "Flagged for moderator review (possible private individual or identifying info).";
-      }
-
+      // 🔥 WRITE BACK TO NOTION (INCLUDING STATUS)
       const up = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
         method: "PATCH",
         headers: notionHeaders(),
         body: JSON.stringify({
           properties: {
-            "AI Filter Result": { rich_text: [{ text: { content: result } }] },
-            "AI Rewritten Version": { rich_text: [{ text: { content: rewritten } }] },
-            "AI Summary": { rich_text: [{ text: { content: summary } }] },
-
-            // OPTIONAL if you added Status as Select:
-            // Status: { select: { name: result === "SAFE" ? "SAFE Candidates" : "UNSAFE / Discarded" } },
+            "AI Filter Result": {
+              rich_text: [{ text: { content: result } }],
+            },
+            "AI Rewritten Version": {
+              rich_text: [{ text: { content: rewritten } }],
+            },
+            "AI Summary": {
+              rich_text: [{ text: { content: summary } }],
+            },
+            Status: {
+              select: {
+                name: result === "SAFE"
+                  ? "SAFE Candidates"
+                  : "UNSAFE / Discarded",
+              },
+            },
           },
         }),
       });
 
-      const upText = await up.text();
-      if (!up.ok) return new NextResponse(`Notion update failed: ${up.status}\n${upText}`, { status: 500 });
+      if (!up.ok) {
+        const err = await up.text();
+        return new NextResponse(err, { status: 500 });
+      }
     }
 
-    return NextResponse.json({ processed: pages.length, mode: "fallback_rules" });
+    return NextResponse.json({ processed: pages.length, mode: "fallback" });
   } catch (e: any) {
-    return new NextResponse(`AI Review crashed: ${e?.message || String(e)}`, { status: 500 });
+    return new NextResponse(String(e), { status: 500 });
   }
 }
