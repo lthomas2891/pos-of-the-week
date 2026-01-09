@@ -1,7 +1,6 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 
 const notionHeaders = () => ({
   Authorization: `Bearer ${(process.env.NOTION_TOKEN || "").trim()}`,
@@ -9,19 +8,78 @@ const notionHeaders = () => ({
   "Notion-Version": "2022-06-28",
 });
 
+// --- Simple SAFE/UNSAFE heuristics (demo-quality) ---
+function looksLikeEmail(s: string) {
+  return /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(s);
+}
+function looksLikePhone(s: string) {
+  return /(\+?\d[\d\s().-]{7,}\d)/.test(s);
+}
+function looksLikeHandle(s: string) {
+  return /@\w{2,}/.test(s);
+}
+function looksLikeAddress(s: string) {
+  // rough: number + street-ish word
+  return /\b\d{1,5}\s+\w+(\s+\w+){0,3}\s+(st|street|ave|avenue|rd|road|blvd|lane|ln|dr|drive|ct|court)\b/i.test(s);
+}
+function looksLikeFullName(s: string) {
+  // two capitalized words (rough, but works for demo)
+  return /\b[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}\b/.test(s);
+}
+function mentionsMinor(s: string) {
+  return /\b(minor|child|kid|toddler|teen|underage|my son|my daughter|high schooler|middle school)\b/i.test(s);
+}
+
+function classify(nominee: string, reason: string) {
+  const text = `${nominee} ${reason}`.trim();
+
+  // UNSAFE signals: PII / private individual vibes
+  if (
+    looksLikeEmail(text) ||
+    looksLikePhone(text) ||
+    looksLikeHandle(text) ||
+    looksLikeAddress(text) ||
+    mentionsMinor(text)
+  ) {
+    return "UNSAFE" as const;
+  }
+
+  // If it looks like a specific person's full name, treat as UNSAFE for your rules
+  if (looksLikeFullName(text)) return "UNSAFE" as const;
+
+  // Otherwise SAFE (archetype / behavior / situation)
+  return "SAFE" as const;
+}
+
+function rewriteSafe(nominee: string) {
+  // Turn "Reply-All Guy" style into vote-ready if needed
+  const n = nominee.trim();
+  if (!n) return "";
+
+  // If it already ends with "guy" / "person" / "energy", keep it punchy
+  if (/\b(guy|person|energy|behavior)\b/i.test(n)) return n;
+
+  // Otherwise make it archetype-ish
+  return `${n} Guy`;
+}
+
+function summarizeSafe(nominee: string, reason: string) {
+  const n = nominee.trim();
+  const r = reason.trim();
+  if (!r) return `The weekly vote for: ${n}.`;
+  // 1–2 sentence clean summary
+  const short = r.length > 140 ? r.slice(0, 137) + "..." : r;
+  return `${short}`;
+}
+
 export async function POST() {
   try {
     const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
     const notionToken = (process.env.NOTION_TOKEN || "").trim();
-    const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
+    if (!notionToken) return new NextResponse("Missing NOTION_TOKEN", { status: 500 });
+    if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID", { status: 500 });
 
-    if (!openaiKey) return new NextResponse("Missing OPENAI_API_KEY (Vercel env var)", { status: 500 });
-    if (!notionToken) return new NextResponse("Missing NOTION_TOKEN (Vercel env var)", { status: 500 });
-    if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID (Vercel env var)", { status: 500 });
-
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    // 1) Find rows where AI Filter Result is empty
+    // Find rows where AI Filter Result is empty
     const q = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
       method: "POST",
       headers: notionHeaders(),
@@ -47,41 +105,19 @@ export async function POST() {
 
       if (!nominee) continue;
 
-      const prompt = `
-You are an automated safety filter and rewriting engine for a humor voting site called "POS of the Week."
+      const result = classify(nominee, reason);
 
-Decide if the nomination is SAFE or UNSAFE.
-- UNSAFE if it refers to a minor or a private individual, or includes identifying info.
-- SAFE if it refers to a public situation, company, fictional character, archetype, meme, behavior, or general scenario.
+      let rewritten = "";
+      let summary = "";
 
-If SAFE:
-- Rewrite into a fun, clean, general version (no names/usernames/identifiers).
-- Write a 1–2 sentence summary for a public poll.
-
-Return JSON ONLY like:
-{"result":"SAFE"|"UNSAFE","rewritten":"...","summary":"..."}
-
-Nominee: ${nominee}
-Reason: ${reason}
-`;
-
-      const resp = await openai.responses.create({
-        model: "gpt-5.2",
-        input: prompt,
-      });
-
-      const text = (resp.output_text || "").trim();
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = { result: "UNSAFE", rewritten: "", summary: "" };
+      if (result === "SAFE") {
+        rewritten = rewriteSafe(nominee);
+        summary = summarizeSafe(rewritten, reason);
+      } else {
+        // For UNSAFE, keep rewrite/summary minimal (or blank) for moderation
+        rewritten = "";
+        summary = "Flagged for moderator review (possible private individual or identifying info).";
       }
-
-      const result = parsed.result === "SAFE" ? "SAFE" : "UNSAFE";
-      const rewritten = String(parsed.rewritten || "").slice(0, 1800);
-      const summary = String(parsed.summary || "").slice(0, 1800);
 
       const up = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
         method: "PATCH",
@@ -92,7 +128,7 @@ Reason: ${reason}
             "AI Rewritten Version": { rich_text: [{ text: { content: rewritten } }] },
             "AI Summary": { rich_text: [{ text: { content: summary } }] },
 
-            // OPTIONAL (only if you added Status as a Select):
+            // OPTIONAL if you added Status as Select:
             // Status: { select: { name: result === "SAFE" ? "SAFE Candidates" : "UNSAFE / Discarded" } },
           },
         }),
@@ -102,7 +138,7 @@ Reason: ${reason}
       if (!up.ok) return new NextResponse(`Notion update failed: ${up.status}\n${upText}`, { status: 500 });
     }
 
-    return NextResponse.json({ processed: pages.length });
+    return NextResponse.json({ processed: pages.length, mode: "fallback_rules" });
   } catch (e: any) {
     return new NextResponse(`AI Review crashed: ${e?.message || String(e)}`, { status: 500 });
   }
