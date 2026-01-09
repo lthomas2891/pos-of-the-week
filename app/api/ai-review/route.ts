@@ -1,26 +1,7 @@
 export const runtime = "nodejs";
 
-export async function POST() {
-  const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
-  const notionToken = (process.env.NOTION_TOKEN || "").trim();
-  const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
-
-  if (!openaiKey) return new NextResponse("Missing OPENAI_API_KEY (Vercel env var)", { status: 500 });
-  if (!notionToken) return new NextResponse("Missing NOTION_TOKEN (Vercel env var)", { status: 500 });
-  if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID (Vercel env var)", { status: 500 });
-
-  try {
-      } catch (e: any) {
-    return new NextResponse(`AI Review crashed: ${e?.message || String(e)}`, { status: 500 });
-  }
-}
-
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: (process.env.OPENAI_API_KEY || "").trim(),
-});
 
 const notionHeaders = () => ({
   Authorization: `Bearer ${(process.env.NOTION_TOKEN || "").trim()}`,
@@ -29,34 +10,44 @@ const notionHeaders = () => ({
 });
 
 export async function POST() {
-  const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
-  if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID", { status: 500 });
+  try {
+    const databaseId = (process.env.NOTION_DATABASE_ID || "").trim();
+    const notionToken = (process.env.NOTION_TOKEN || "").trim();
+    const openaiKey = (process.env.OPENAI_API_KEY || "").trim();
 
-  // Find rows where AI Filter Result is empty
-  const q = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
-    method: "POST",
-    headers: notionHeaders(),
-    body: JSON.stringify({
-      filter: { property: "AI Filter Result", rich_text: { is_empty: true } },
-      page_size: 10,
-    }),
-  });
+    if (!openaiKey) return new NextResponse("Missing OPENAI_API_KEY (Vercel env var)", { status: 500 });
+    if (!notionToken) return new NextResponse("Missing NOTION_TOKEN (Vercel env var)", { status: 500 });
+    if (!databaseId) return new NextResponse("Missing NOTION_DATABASE_ID (Vercel env var)", { status: 500 });
 
-  if (!q.ok) return new NextResponse(await q.text(), { status: 500 });
-  const qjson: any = await q.json();
-  const pages = qjson.results || [];
+    const openai = new OpenAI({ apiKey: openaiKey });
 
-  for (const p of pages) {
-    const pageId = p.id;
+    // 1) Find rows where AI Filter Result is empty
+    const q = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
+      method: "POST",
+      headers: notionHeaders(),
+      body: JSON.stringify({
+        filter: { property: "AI Filter Result", rich_text: { is_empty: true } },
+        page_size: 10,
+      }),
+    });
 
-    const nominee =
-      p.properties?.Nominee?.title?.map((t: any) => t.plain_text).join("")?.trim() || "";
-    const reason =
-      p.properties?.Reason?.rich_text?.map((t: any) => t.plain_text).join("")?.trim() || "";
+    const qText = await q.text();
+    if (!q.ok) return new NextResponse(`Notion query failed: ${q.status}\n${qText}`, { status: 500 });
 
-    if (!nominee) continue;
+    const qjson: any = JSON.parse(qText);
+    const pages = qjson.results || [];
 
-    const prompt = `
+    for (const p of pages) {
+      const pageId = p.id;
+
+      const nominee =
+        p.properties?.Nominee?.title?.map((t: any) => t.plain_text).join("")?.trim() || "";
+      const reason =
+        p.properties?.Reason?.rich_text?.map((t: any) => t.plain_text).join("")?.trim() || "";
+
+      if (!nominee) continue;
+
+      const prompt = `
 You are an automated safety filter and rewriting engine for a humor voting site called "POS of the Week."
 
 Decide if the nomination is SAFE or UNSAFE.
@@ -74,42 +65,45 @@ Nominee: ${nominee}
 Reason: ${reason}
 `;
 
-    const resp = await openai.responses.create({
-      model: "gpt-5.2",
-      input: prompt,
-    }); // Responses API :contentReference[oaicite:1]{index=1}
+      const resp = await openai.responses.create({
+        model: "gpt-5.2",
+        input: prompt,
+      });
 
-    const text = (resp.output_text || "").trim();
+      const text = (resp.output_text || "").trim();
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = { result: "UNSAFE", rewritten: "", summary: "" };
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = { result: "UNSAFE", rewritten: "", summary: "" };
+      }
+
+      const result = parsed.result === "SAFE" ? "SAFE" : "UNSAFE";
+      const rewritten = String(parsed.rewritten || "").slice(0, 1800);
+      const summary = String(parsed.summary || "").slice(0, 1800);
+
+      const up = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
+        method: "PATCH",
+        headers: notionHeaders(),
+        body: JSON.stringify({
+          properties: {
+            "AI Filter Result": { rich_text: [{ text: { content: result } }] },
+            "AI Rewritten Version": { rich_text: [{ text: { content: rewritten } }] },
+            "AI Summary": { rich_text: [{ text: { content: summary } }] },
+
+            // OPTIONAL (only if you added Status as a Select):
+            // Status: { select: { name: result === "SAFE" ? "SAFE Candidates" : "UNSAFE / Discarded" } },
+          },
+        }),
+      });
+
+      const upText = await up.text();
+      if (!up.ok) return new NextResponse(`Notion update failed: ${up.status}\n${upText}`, { status: 500 });
     }
 
-    const result = parsed.result === "SAFE" ? "SAFE" : "UNSAFE";
-    const rewritten = String(parsed.rewritten || "").slice(0, 1800);
-    const summary = String(parsed.summary || "").slice(0, 1800);
-
-    // Write back to Notion
-    const up = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
-      method: "PATCH",
-      headers: notionHeaders(),
-      body: JSON.stringify({
-        properties: {
-          "AI Filter Result": { rich_text: [{ text: { content: result } }] },
-          "AI Rewritten Version": { rich_text: [{ text: { content: rewritten } }] },
-          "AI Summary": { rich_text: [{ text: { content: summary } }] },
-
-          // If you added Status (Select), you can uncomment:
-          // Status: { select: { name: result === "SAFE" ? "SAFE Candidates" : "UNSAFE / Discarded" } },
-        },
-      }),
-    });
-
-    if (!up.ok) return new NextResponse(await up.text(), { status: 500 });
+    return NextResponse.json({ processed: pages.length });
+  } catch (e: any) {
+    return new NextResponse(`AI Review crashed: ${e?.message || String(e)}`, { status: 500 });
   }
-
-  return NextResponse.json({ processed: pages.length });
 }
