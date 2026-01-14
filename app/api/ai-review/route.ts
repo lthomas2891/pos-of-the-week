@@ -139,3 +139,12 @@ export async function POST() {
 export async function GET() {
   return POST();
 }
+export async function GET() {
+  return POST();
+}
+
+// Some schedulers test with HEAD first.
+// Return 200 so the “test” passes.
+export async function HEAD() {
+  return new Response(null, { status: 200 });
+}
