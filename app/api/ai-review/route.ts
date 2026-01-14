@@ -136,3 +136,6 @@ export async function POST() {
     return new NextResponse(String(e), { status: 500 });
   }
 }
+export async function GET() {
+  return POST();
+}
