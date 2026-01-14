@@ -147,4 +147,11 @@ export async function GET() {
 // Return 200 so the “test” passes.
 export async function HEAD() {
   return new Response(null, { status: 200 });
+}export async function GET() {
+  return POST();
 }
+
+export async function HEAD() {
+  return new Response(null, { status: 200 });
+}
+
