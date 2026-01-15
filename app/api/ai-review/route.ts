@@ -52,6 +52,15 @@ async function run(req: Request) {
 
   // 2) Count rows where "AI Filter Result" is empty AND not Archived
   const pages = (data.results || []) as any[];
+  const sample = pages[0]?.properties || {};
+return NextResponse.json({
+  ok: true,
+  debug: {
+    keys: Object.keys(sample),
+    ai: sample["AI Filter Result"],
+    archived: sample["Archived"],
+  },
+});
 
   const needsReview = pages.filter((p) => {
     const props = p.properties || {};
