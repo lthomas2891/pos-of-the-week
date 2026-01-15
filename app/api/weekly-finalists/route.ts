@@ -1,3 +1,4 @@
+// deploy-trigger: weekly-finalists route present
 import { NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 
