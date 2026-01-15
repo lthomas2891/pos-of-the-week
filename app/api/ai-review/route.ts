@@ -25,11 +25,58 @@ async function run(req: Request) {
   const denied = authorize(req);
   if (denied) return denied;
 
-  // Temporary fallback demo response (Step 2 will replace this later)
+  const NOTION_TOKEN = (process.env.NOTION_TOKEN || "").trim();
+  const DB = (process.env.NOTION_DATABASE_ID || "").trim();
+
+  if (!NOTION_TOKEN || !DB) {
+    return new NextResponse("Missing NOTION_TOKEN or NOTION_DATABASE_ID", { status: 500 });
+  }
+
+  // 1) Pull the first page of database entries
+  const res = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${NOTION_TOKEN}`,
+      "Content-Type": "application/json",
+      "Notion-Version": "2022-06-28",
+    },
+    body: JSON.stringify({
+      page_size: 50
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) return new NextResponse(`Notion query failed: ${res.status}\n${text}`, { status: 500 });
+
+  const data = JSON.parse(text);
+
+  // 2) Count rows where "AI Filter Result" is empty AND not Archived
+  const pages = (data.results || []) as any[];
+
+  const needsReview = pages.filter((p) => {
+    const props = p.properties || {};
+
+    const ai = props["AI Filter Result"];
+    const archived = props["Archived"];
+
+    const aiEmpty =
+      !ai ||
+      (ai.type === "select" && !ai.select) ||
+      (ai.type === "rich_text" && (!ai.rich_text || ai.rich_text.length === 0));
+
+    const isArchived =
+      archived &&
+      archived.type === "checkbox" &&
+      archived.checkbox === true;
+
+    return aiEmpty && !isArchived;
+  });
+
   return NextResponse.json({
     ok: true,
-    mode: "fallback",
-    processed: 0,
+    mode: "notion-count",
+    processed: needsReview.length,
+    checked: pages.length,
     ranAt: new Date().toISOString(),
   });
 }
