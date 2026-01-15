@@ -54,19 +54,23 @@ function getWeekRangeISO() {
   };
 }
 
-function getCheckboxProp(page: any, propName: string): boolean {
-  const prop = page?.properties?.[propName];
+function getCheckboxProp(page: unknown, propName: string): boolean {
+  const p = page as any;
+  const prop = p?.properties?.[propName];
   return prop?.type === "checkbox" ? Boolean(prop.checkbox) : false;
 }
 
-function getSelectProp(page: any, propName: string): string | null {
-  const prop = page?.properties?.[propName];
+function getSelectProp(page: unknown, propName: string): string | null {
+  const p = page as any;
+  const prop = p?.properties?.[propName];
   return prop?.type === "select" ? prop.select?.name ?? null : null;
 }
 
-function getDateProp(page: any, propName: string): string | null {
-  const prop = page?.properties?.[propName];
+function getDateProp(page: unknown, propName: string): string | null {
+  const p = page as any;
+  const prop = p?.properties?.[propName];
   return prop?.type === "date" ? prop.date?.start ?? null : null;
+
 }
 
 async function updateStatus(pageId: string, statusName: string) {
