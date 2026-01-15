@@ -32,7 +32,7 @@ async function run(req: Request) {
     return new NextResponse("Missing NOTION_TOKEN or NOTION_DATABASE_ID", { status: 500 });
   }
 
-  // 1) Pull the first page of database entries
+  // Pull up to 50 entries
   const res = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, {
     method: "POST",
     headers: {
@@ -40,27 +40,47 @@ async function run(req: Request) {
       "Content-Type": "application/json",
       "Notion-Version": "2022-06-28",
     },
-    body: JSON.stringify({
-      page_size: 50
-    }),
+    body: JSON.stringify({ page_size: 50 }),
   });
 
   const text = await res.text();
   if (!res.ok) return new NextResponse(`Notion query failed: ${res.status}\n${text}`, { status: 500 });
 
   const data = JSON.parse(text);
-
-  // 2) Count rows where "AI Filter Result" is empty AND not Archived
   const pages = (data.results || []) as any[];
-  const sample = pages[0]?.properties || {};
-return NextResponse.json({
-  ok: true,
-  debug: {
-    keys: Object.keys(sample),
-    ai: sample["AI Filter Result"],
-    archived: sample["Archived"],
-  },
-});
+
+  // Count: not archived AND status empty OR status == "Needs AI Review"
+  const needsReview = pages.filter((p) => {
+    const props = p.properties || {};
+    const archived = props["Archived"];
+    const status = props["Status"];
+
+    const isArchived = archived?.type === "checkbox" ? archived.checkbox === true : false;
+
+    // Status can be rich_text, select, or (rarely) title
+    const statusText =
+      status?.type === "rich_text"
+        ? (status.rich_text?.map((x: any) => x.plain_text).join("") || "").trim()
+        : status?.type === "select"
+        ? (status.select?.name || "").trim()
+        : status?.type === "title"
+        ? (status.title?.map((x: any) => x.plain_text).join("") || "").trim()
+        : "";
+
+    const isNeeds =
+      statusText === "" || statusText.toLowerCase() === "needs ai review";
+
+    return !isArchived && isNeeds;
+  });
+
+  return NextResponse.json({
+    ok: true,
+    mode: "status-count",
+    processed: needsReview.length,
+    checked: pages.length,
+    ranAt: new Date().toISOString(),
+  });
+}
 
   const needsReview = pages.filter((p) => {
     const props = p.properties || {};
