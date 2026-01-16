@@ -81,6 +81,18 @@ async function updateStatus(pageId: string, statusName: string) {
     },
   } as any);
 }
+async function getPrimaryDataSourceId(databaseId: string): Promise<string> {
+  const db: any = await notion.databases.retrieve({ database_id: databaseId } as any);
+
+  const sources = db?.data_sources;
+  if (!Array.isArray(sources) || sources.length === 0) {
+    throw new Error("No data_sources found on this database. Is the Notion API version mismatched?");
+  }
+
+  const id = sources[0]?.id;
+  if (!id) throw new Error("data_sources[0].id missing");
+  return id;
+}
 
 export async function GET(req: Request) {
   try {
@@ -96,27 +108,30 @@ export async function GET(req: Request) {
 
     const { startISO, endISO } = getWeekRangeISO();
 
-    const res = await notion.databases.query({
-      database_id: DATABASE_ID!,
-      filter: {
-        and: [
-          { property: PROP.archived, checkbox: { equals: false } },
-          {
-            property: PROP.dateSubmitted,
-            date: { on_or_after: startISO, on_or_before: endISO },
-          },
-          {
-            or: [
-              { property: PROP.status, select: { equals: STATUS.safe } },
-              { property: PROP.status, select: { equals: STATUS.finalists } },
-              { property: PROP.topPick, checkbox: { equals: true } },
-            ],
-          },
+    const dataSourceId = await getPrimaryDataSourceId(DATABASE_ID!);
+
+const res = await (notion as any).dataSources.query({
+  data_source_id: dataSourceId,
+  filter: {
+    and: [
+      { property: PROP.archived, checkbox: { equals: false } },
+      {
+        property: PROP.dateSubmitted,
+        date: { on_or_after: startISO, on_or_before: endISO },
+      },
+      {
+        or: [
+          { property: PROP.status, select: { equals: STATUS.safe } },
+          { property: PROP.status, select: { equals: STATUS.finalists } },
+          { property: PROP.topPick, checkbox: { equals: true } },
         ],
       },
-      sorts: [{ property: PROP.dateSubmitted, direction: "ascending" }],
-      page_size: 100,
-    } as any);
+    ],
+  },
+  sorts: [{ property: PROP.dateSubmitted, direction: "ascending" }],
+  page_size: 100,
+} as any);
+
 
     const pages = res.results as any[];
 
