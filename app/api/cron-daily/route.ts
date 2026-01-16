@@ -14,14 +14,8 @@ function assertEnv() {
 }
 
 function getBaseUrl(req: Request): string {
-  // Always use the origin of the incoming request (e.g. https://app.weeklypos.com)
+  // Always call back to the same origin that invoked this endpoint (e.g. https://app.weeklypos.com)
   return new URL(req.url).origin;
-};
-
-  const host = req.headers.get("host");
-  if (host) return `https://${host}`;
-
-  return "https://app.weeklypos.com";
 }
 
 type CallResult =
@@ -72,6 +66,7 @@ export async function GET(req: Request) {
       ? `/api/weekly-finalists?${qs.toString()}`
       : "/api/weekly-finalists";
 
+    // 1) AI review first
     const aiReview = await callInternal(baseUrl, "/api/ai-review", CRON_SECRET);
     if (!aiReview.ok) {
       return NextResponse.json(
@@ -80,6 +75,7 @@ export async function GET(req: Request) {
       );
     }
 
+    // 2) Then weekly finalists
     const weeklyFinalists = await callInternal(baseUrl, finalistsPath, CRON_SECRET);
     if (!weeklyFinalists.ok) {
       return NextResponse.json(
