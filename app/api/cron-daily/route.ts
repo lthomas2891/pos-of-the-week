@@ -14,8 +14,9 @@ function assertEnv() {
 }
 
 function getBaseUrl(req: Request): string {
-  const vercelUrl = process.env.VERCEL_URL;
-  if (vercelUrl) return `https://${vercelUrl}`;
+  // Always use the origin of the incoming request (e.g. https://app.weeklypos.com)
+  return new URL(req.url).origin;
+};
 
   const host = req.headers.get("host");
   if (host) return `https://${host}`;
