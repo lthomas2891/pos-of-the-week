@@ -84,10 +84,13 @@ export async function GET(req: Request) {
       );
     }
 
+    // 3) Then archive last week (do NOT fail the whole cron if this errors)
+    const archiveLastWeek = await callInternal(baseUrl, "/api/archive-last-week", CRON_SECRET);
+
     return NextResponse.json({
       ok: true,
       mode: "cron-daily",
-      ran: { aiReview, weeklyFinalists },
+      ran: { aiReview, weeklyFinalists, archiveLastWeek },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
