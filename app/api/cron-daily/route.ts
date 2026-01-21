@@ -14,7 +14,6 @@ function assertEnv() {
 }
 
 function getBaseUrl(req: Request): string {
-  // Always call back to the same origin that invoked this endpoint (e.g. https://app.weeklypos.com)
   return new URL(req.url).origin;
 }
 
@@ -84,13 +83,13 @@ export async function GET(req: Request) {
       );
     }
 
-    // 3) Then archive last week (do NOT fail the whole cron if this errors)
-    const archiveLastWeek = await callInternal(baseUrl, "/api/archive-last-week", CRON_SECRET);
+    // 3) Close last week (auto-winner + archive). Idempotent, safe to run daily.
+    const closeWeek = await callInternal(baseUrl, "/api/close-week", CRON_SECRET);
 
     return NextResponse.json({
       ok: true,
       mode: "cron-daily",
-      ran: { aiReview, weeklyFinalists, archiveLastWeek },
+      ran: { aiReview, weeklyFinalists, closeWeek },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
